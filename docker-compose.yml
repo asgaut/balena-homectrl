@@ -1,0 +1,92 @@
+version: "2.1"
+volumes:
+    mosquitto:
+    zigbee2mqtt-data:
+    tailscale-state: {}
+    influx-data:
+services:
+  influxdb:
+    image: influxdb:latest
+    volumes:
+      # Mount for influxdb data directory and configuration
+      - influx-data:/var/lib/influxdb2:rw
+    ports:
+      - 8086:8086
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=homectrl
+      - DOCKER_INFLUXDB_INIT_ORG=homectrl
+      - DOCKER_INFLUXDB_INIT_BUCKET=zigbee2mqtt
+      # Set via Balena device variable instead
+      #- DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=my-super-secret-auth-token
+      - DOCKER_INFLUXDB_INIT_RETENTION=365d
+  mqtt:
+    build: mqtt
+    ports:
+      - "1883:1883"
+    restart: always
+    volumes:
+      - mosquitto:/mosquitto/data
+  telegraf:
+    build: telegraf
+    restart: always
+    depends_on:
+      - "mqtt"
+      - "influxdb"
+    privileged: true
+  zigbee2mqtt:
+    container_name: zigbee2mqtt
+    image: koenkk/zigbee2mqtt
+    restart: unless-stopped
+    depends_on:
+      - mqtt
+    privileged: true
+    volumes:
+      - "zigbee2mqtt-data:/app/data"
+    ports:
+      # Frontend port
+      - 8080:8080
+    environment:
+      - TZ=Europe/Berlin
+      - ZIGBEE2MQTT_CONFIG_SERIAL_PORT=/dev/ttyACM0
+      - ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER=deconz
+      - ZIGBEE2MQTT_CONFIG_MQTT_SERVER=mqtt://mqtt
+      - ZIGBEE2MQTT_CONFIG_HOMEASSISTANT=false
+      - ZIGBEE2MQTT_CONFIG_FRONTEND=true
+      - ZIGBEE2MQTT_CONFIG_PERMIT_JOIN=false
+      - ZIGBEE2MQTT_CONFIG_ADVANCED_LOG_LEVEL=warn
+      - ZIGBEE2MQTT_CONFIG_ADVANCED_LEGACY_API=false
+      # Publish JSON in availability topic
+      - ZIGBEE2MQTT_CONFIG_ADVANCED_LEGACY_AVAILABILITY_PAYLOAD=false
+    devices:
+      # Make sure this matches your adapter location
+      - "/dev/ttyACM0:/dev/ttyACM0"
+  price-control:
+    container_name: price-control
+    build: price-control
+    restart: unless-stopped
+    depends_on:
+      - mqtt
+      - zigbee2mqtt
+    environment:
+      - TZ=Europe/Berlin
+      - MQTT_SERVER=mqtt
+  tailscale:
+    # Based on https://github.com/hslatman/tailscale-balena-block
+    build:
+      context: tailscale
+      dockerfile: Dockerfile.template
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    environment:
+      # Set via Balena device variable instead
+      # - TAILSCALE_KEY: <YOUR_TAILSCALE_KEY>
+      - TAILSCALE_IP=true
+      #- TAILSCALE_TAGS=tag:homeassistant
+    volumes:
+      - tailscale-state:/tailscale
+    labels:
+      # Required to get BALENA_API_KEY set inside container
+      io.balena.features.balena-api: '1'

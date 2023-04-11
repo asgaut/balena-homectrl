@@ -1,0 +1,12 @@
+FROM balenalib/%%BALENA_MACHINE_NAME%%-alpine-python:3.10-3.14-run
+
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+COPY requirements.txt requirements.txt
+RUN python -m pip install -r requirements.txt
+
+# When using COPY with more than one source file, the destination must be a directory and end with a /
+COPY *.py /app/
+
+CMD ["sh","/app/start.sh"]
