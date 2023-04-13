@@ -58,18 +58,29 @@ async def control(dry_run: bool):
         await home.update_price_info()
         await tibber_connection.close_connection()
 
-        old_price_level = ""
-        now = dt.datetime.utcnow().astimezone(dt.timezone.utc)
-        print("Todays and next 12 hours prices:")
+        # Create a new dict with only the prices for the previous and next 12 hours
+        prices = {}
+        current_time = dt.datetime.utcnow().astimezone(dt.timezone.utc)
+        for key in home.price_total.keys():
+            key_time = dt.datetime.fromisoformat(key).astimezone(dt.timezone.utc)
+            if key_time <= current_time + dt.timedelta(hours=12) and \
+                key_time >= current_time - dt.timedelta(hours=12):
+                prices[key] = home.price_total[key]
+
+        # Create a new dict with the price index for each price
+        price_index = {}
+        index = 0
+        for kv in sorted(prices.items(), key=lambda kv: kv[1]):
+            price_index[kv[0]] = index
+            index += 1
+        print('Number of hours considered: ', len(price_index))
+
+        print("Current prices:")
         for key in home.price_level:
-            if dt.datetime.fromisoformat(key).astimezone(dt.timezone.utc) <= now + dt.timedelta(hours=12):
-                now_price_level = home.price_level[key]
-                if now_price_level != old_price_level:
-                    print(key, '->', home.price_level[key], home.price_total[key], 'kr')
-                    old_price_level = now_price_level
+            level = "#" * (price_index.get(key, -1) + 1)
+            print(f'{key} -> {price_index.get(key, -1):02d} {home.price_level[key]:14s} {home.price_total[key]:.2f} kr {level}')
 
         start_day = dt.datetime.utcnow().day
-        old_price_level = ""
         print("Controlling power usage:")
         while True:
             global want_disconnect
@@ -82,51 +93,49 @@ async def control(dry_run: bool):
             now = dt.datetime.utcnow()
             now_hour = dt.datetime(now.year, now.month, now.day, now.hour, tzinfo=dt.timezone.utc)
             now_price_level = ""
+            now_price_index = -1
             for key in home.price_level:
                 if dt.datetime.fromisoformat(key).astimezone(dt.timezone.utc) == now_hour:
-                    if home.price_total[key] <= 1.0:
-                        now_price_level = "NORMAL"
-                    else:
-                        now_price_level = home.price_level[key]
-                    if now_price_level != old_price_level:
-                        print(key, '->', now_price_level)
-                        old_price_level = now_price_level
+                    now_price_level = home.price_level[key]
+                    now_price_index = price_index.get(key, -1)
                     break;
 
-            if not dry_run:
-                if now_price_level == "VERY_CHEAP" or now_price_level == "CHEAP" or now_price_level == "NORMAL":
-                    payload = '{"away_mode":"OFF"}'
-                    payload_power = '{"state": "ON"}'
-                else:
-                    payload = '{"away_mode":"ON"}'
-                    payload_power = '{"state": "OFF"}'
-
-                # VK Entré
-                mqttc.publish("zigbee2mqtt/0x1fff0001000001f2/set", payload, qos=0, retain=False)
-                sleep(3)
-                # VK Bad (kjeller)
-                mqttc.publish("zigbee2mqtt/0x1fff000100000220/set", payload, qos=0, retain=False)
-                sleep(3)
-                # VK Bad (2. etg)
-                mqttc.publish("zigbee2mqtt/0x1fff000100000217/set", payload, qos=0, retain=False)
-                sleep(3)
-
-                # VV-bereder power
-                # APEX smart plug 16A (Datek HLU2909K)
-                mqttc.publish("zigbee2mqtt/0x086bd7fffeb6ac3c/set", payload_power, qos=0, retain=False)
-
-                for x in range(0, 60):
-                    if want_disconnect:
-                        break
-                    sleep(1)
-
-                if start_day != now.day:
-                    break
+            if now_price_level == "VERY_CHEAP" or now_price_index < 18:
+                payload = '{"away_mode":"OFF"}'
+                payload_power = '{"state": "ON"}'
             else:
+                payload = '{"away_mode":"ON"}'
+                payload_power = '{"state": "OFF"}'
+
+            if dry_run:
+                print(f'Now (UTC): {now_hour} {now_price_level} price_index:{now_price_index:02d}')
+                print(f'Payload: {payload}')
                 want_disconnect = True
                 mqttc.disconnect()
                 sleep(1)
                 sys.exit(0)
+
+            # VK Entré
+            mqttc.publish("zigbee2mqtt/0x1fff0001000001f2/set", payload, qos=0, retain=False)
+            sleep(3)
+            # VK Bad (kjeller)
+            mqttc.publish("zigbee2mqtt/0x1fff000100000220/set", payload, qos=0, retain=False)
+            sleep(3)
+            # VK Bad (2. etg)
+            mqttc.publish("zigbee2mqtt/0x1fff000100000217/set", payload, qos=0, retain=False)
+            sleep(3)
+
+            # VV-bereder power
+            # APEX smart plug 16A (Datek HLU2909K)
+            mqttc.publish("zigbee2mqtt/0x086bd7fffeb6ac3c/set", payload_power, qos=0, retain=False)
+
+            for x in range(0, 60):
+                if want_disconnect:
+                    break
+                sleep(1)
+
+            if start_day != now.day:
+                break
 
 
 def signal_handler(sig, frame):
