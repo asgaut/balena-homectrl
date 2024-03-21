@@ -6,7 +6,7 @@ Here’s the list of items required for a basic setup:
 * Raspberry Pi 3B or greater
 * 32GB (or larger) Micro-SD Card (we recommend Sandisk Extreme Pro SD cards)
 * Power supply and cable
-* Zigbee adapter ([ConBee II](https://phoscon.de/en/conbee2)
+* Zigbee adapter [ConBee II](https://phoscon.de/en/conbee2)
 
 ## Software required
 
